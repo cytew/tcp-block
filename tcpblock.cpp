@@ -83,70 +83,63 @@ Ip GetMyIp(const char* ifname){
 }
 
 
-
-uint16_t calc(uint16_t * data, int len) {
-	uint16_t result;
-	int tmp = 0;
-	int length;
-	bool flag = false;
-	if ((len % 2) == 0)
-		length = len / 2;
-	else {
-		length = (len / 2) + 1;
-		flag = true;
-	}
-
-	for (int i = 0; i < length; ++i) {
-		if (i == length - 1 && flag)
-			tmp += ntohs(data[i] & 0x00ff);
-		else
-			tmp += ntohs(data[i]);
-		if (tmp > 65536)
-			tmp = (tmp - 65536) + 1;
-	}
-	result = tmp;
-	return result;
-}
-
-
 uint16_t ip_checksum(uint8_t * ip_packet , uint8_t len){
-    uint32_t sum = 0;
-    for(int i=0; i<len;i++){
-        sum+=ip_packet[i];
+	uint16_t *pIpH = (uint16_t *)ip_packet;
+    uint32_t checksum = 0;
+	uint16_t res;
+	int length;
+	length = len / 2;
+    for(int i=0; i<length;i++){
+        checksum += *pIpH++;
     }
-    uint16_t res=(sum>>16)+(sum&0xffff);
-    return ~res;
+    checksum=(checksum>>16)+(checksum&0xffff);
+	checksum += (checksum >> 16);
+
+	res = (~checksum & 0xffff);
+    return res;
 }
 
 
-uint16_t tcp_checksum(uint8_t * ip_packet, int len) { //https://slowknight.tistory.com/4 참고
-	struct pseudo_header pseh;
-	struct ip_header * iph = (struct ip_header *)ip_packet;
-	struct tcp_header * tcph = (struct tcp_header *)(ip_packet + 20);
+uint16_t tcp_checksum(struct ip_header * packet_ip) { //https://slowknight.tistory.com/4 참고
 
-	memcpy(&pseh.src_IP, &iph->ip_src, sizeof(pseh.src_IP));
-	memcpy(&pseh.dest_IP, &iph->ip_dst, sizeof(pseh.dest_IP));
-	pseh.protocol = iph->ip_p;
-	pseh.tcp_len = htons(len - (20));
+	uint16_t *iph = (uint16_t*)packet_ip;
+	uint16_t * tcph =(uint16_t*)(packet_ip + 20);
+	uint16_t * tmp;
 
-	uint16_t pseudoResult = calc((uint16_t *)&pseh, sizeof(pseh));
+	uint16_t dataLen = (ntohs( packet_ip->ip_len )) - 20;
+	uint16_t nLen = dataLen;
+	uint16_t checksum=0;
+	uint16_t res=0;
 
-	tcph->th_sum = 0;
-	uint16_t tcpHeaderResult = calc((uint16_t *)tcph, ntohs(pseh.tcp_len));
+	nLen = nLen/2;
 
-	uint16_t checksum;
+	for( int i = 0; i < nLen; i++ ) { 
+		checksum += *tcph++;
+	}
 
-	int tempCheck;
-	if ((tempCheck = pseudoResult + tcpHeaderResult) > 65536)
-		checksum = (tempCheck - 65536) + 1;
-	else
-		checksum = tempCheck;
+	if( dataLen % 2 == 1 ){
+		checksum += *tcph++ & 0x00ff;
+	}
 
-	checksum = ntohs(~checksum);
-	tcph->th_sum = checksum;
+	tmp = (uint16_t*) (&packet_ip->ip_src);
+	for( int i = 0; i < 2; i ++ ){
+		checksum += *tmp++;
+	}
+	tmp = (uint16_t*) (&packet_ip->ip_dst);
+	for( int i = 0; i < 2; i ++ ){
+		checksum += *tmp++;
+	}
 
-	return checksum;
+	checksum += htons(6);
+	checksum += htons(dataLen);
+
+	checksum=(checksum>>16)+(checksum&0xffff);
+	checksum += (checksum >> 16);
+
+	res = (~checksum & 0xffff);
+    return res;
 }
+
 
 void forward_rst(pcap_t * handle, uint8_t* pkt) {
     int ip_len = 20;
@@ -177,9 +170,9 @@ void forward_rst(pcap_t * handle, uint8_t* pkt) {
     packet_tcp->th_flags = 0x14;
     
 	packet_ip->ip_sum = 0;
-	packet_ip->ip_sum = htons(ip_checksum((packet + 14),ip_len));
+	packet_ip->ip_sum = (ip_checksum((packet + 14),ip_len));
 	packet_tcp->th_sum = 0;
-	packet_tcp->th_sum = htons(tcp_checksum(packet + 14, ntohs(packet_ip->ip_len)));
+	packet_tcp->th_sum = htons(tcp_checksum(packet_ip));
     
 	pcap_sendpacket(handle, packet, 14 + ntohs(packet_ip->ip_len));
 }
@@ -220,9 +213,9 @@ void backward_fin(pcap_t * handle, uint8_t * pkt, const char * data) {
 	packet_tcp->th_ack = htonl((ntohl(rcvpacket_tcp->th_seq) + http_len)+1);
 
 	packet_ip->ip_sum = 0;
-	packet_ip->ip_sum =htons(ip_checksum((packet + 14),ip_len));
+	packet_ip->ip_sum =(ip_checksum((packet + 14),ip_len));
 	packet_tcp->th_sum = 0;
-	packet_tcp->th_sum = htons(tcp_checksum(packet + 14, ntohs(packet_ip->ip_len)));
+	packet_tcp->th_sum = htons(tcp_checksum(packet_ip));
 	pcap_sendpacket(handle, packet, 14 + ntohs(packet_ip->ip_len));
 }
 

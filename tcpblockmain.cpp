@@ -38,17 +38,15 @@ void usage() {
 
 int main(int argc, char* argv[]) {
 	
-
-	if (argc !=3 ) 
-    {
+	if (argc !=3 ){
 		usage();
 		return -1;
 	}
 
 	char* dev = argv[1];
-    char * block_site = argv[2];
+	char * block_site = argv[2];
 	char errbuf[PCAP_ERRBUF_SIZE];
-    char warning[7] = "block!";
+	char warning[7] = "block!";
 
     struct pcap_pkthdr * header;
 
@@ -74,15 +72,16 @@ int main(int argc, char* argv[]) {
 			return 0;
 		}
 
+		int ip_len = 20;
 		struct ether_header * packet_ether = (struct ether_header *)pkt;
 		struct ip_header * packet_ip = (struct ip_header *)(pkt + 14);
-		int ip_len = 20;
-
 		struct tcp_header * packet_tcp = (struct tcp_header *)(pkt + 14 + ip_len);
 		int tcp_len = (((packet_tcp->th_len) & 0xf0) >> 4) *4;
 		int http_len = ntohs(packet_ip->ip_len) - ip_len - tcp_len;
 
+
 		uint8_t * packet_http = pkt + 14 + ip_len + tcp_len;
+		
 		int i;
 		for ( i = 0; i < 6; ++i) {
 			if (memcmp(HTTP_METHOD[i], packet_http, strlen(HTTP_METHOD[i])) != 0)
